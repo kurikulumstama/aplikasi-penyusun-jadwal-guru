@@ -635,8 +635,9 @@ function toast(msg, type){
    kode backend & panduan deploy). Setiap "slot" simpanan diberi
    nama oleh pengguna dan disimpan sebagai satu baris di sheet.
 ========================================================= */
+const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwGHlgb7wZOOUNCHXj_TqyEYee85h9UqePjJqDUGXwJMAKTNkeSg_HpxpWhu5O4b8nX/exec';
 function getGasUrl(){
-  try{ return localStorage.getItem('jgg_gas_url') || ''; }catch(e){ return state._gasUrlMem || ''; }
+  try{ return localStorage.getItem('jgg_gas_url') || DEFAULT_GAS_URL; }catch(e){ return state._gasUrlMem || DEFAULT_GAS_URL; }
 }
 function setGasUrl(v){
   try{ localStorage.setItem('jgg_gas_url', v); }catch(e){ state._gasUrlMem = v; }
