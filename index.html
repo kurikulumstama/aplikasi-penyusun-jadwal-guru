@@ -1168,14 +1168,29 @@ function renderStep3(){
 
   const listCard = document.createElement('div');
   listCard.className = 'card';
-  listCard.innerHTML = `<h2>Daftar Guru</h2><p class="sub">Guru yang sudah tersimpan. Anda dapat menghapus dan menambah data baru di bawah.</p>`;
+  const listHead = document.createElement('div');
+  listHead.style.display='flex'; listHead.style.justifyContent='space-between'; listHead.style.alignItems='flex-start'; listHead.style.gap='12px'; listHead.style.flexWrap='wrap';
+  listHead.innerHTML = `
+    <div>
+      <h2 style="margin:0;">Daftar Guru</h2>
+      <p class="sub" style="margin:4px 0 0;">Guru yang sudah tersimpan. Anda dapat mengedit, menghapus, atau mengimpor/mengekspor data di sini.</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-shrink:0;">
+      <button class="btn ghost sm" id="btnImportTeachers">⬆ Import Data Guru</button>
+      <button class="btn ghost sm" id="btnExportTeachers">⬇ Export Data Guru</button>
+    </div>
+  `;
+  listCard.appendChild(listHead);
+
   const listWrap = document.createElement('div');
   listWrap.className = 'teacher-list';
+  listWrap.style.marginTop = '18px';
   if(state.teachers.length===0){
     listWrap.innerHTML = `<div class="empty-hint">Belum ada guru yang ditambahkan.</div>`;
   } else {
     sortedTeachers().forEach(t=>{
       const totalHours = t.subjects.reduce((s,su)=>s+su.hours,0);
+      const totalUsed = t.subjects.reduce((s,su)=>s+su.used,0);
       const row = document.createElement('div');
       row.className = 'teacher-card';
       row.innerHTML = `
@@ -1186,11 +1201,24 @@ function renderStep3(){
             <div class="subs">${t.subjects.map(s=>`${s.subject} · ${classNameById(s.classId)} (${s.hours} jam)`).join(' &nbsp;|&nbsp; ')} — total ${totalHours} jam</div>
           </div>
         </div>
-        <button class="icon-btn" data-code="${t.code}">✕</button>
+        <div style="display:flex;gap:6px;align-items:center;">
+          ${totalUsed>0 ? `<span class="mono" style="font-size:11px;color:var(--muted-2);">${totalUsed} jam terjadwal</span>` : ''}
+          <button class="icon-btn" data-act="edit" title="Edit guru ini">✎</button>
+          <button class="icon-btn" data-act="del" title="Hapus guru ini">✕</button>
+        </div>
       `;
-      row.querySelector('button').onclick = ()=>{
-        if(!confirm(`Hapus guru ${t.name}?`)) return;
+      row.querySelector('[data-act=del]').onclick = ()=>{
+        if(!confirm(`Hapus guru ${t.name}? Semua jadwal yang sudah diisi untuk guru ini juga akan dihapus.`)) return;
+        clearTeacherSchedule(t.code);
         state.teachers = state.teachers.filter(x=>x.code!==t.code);
+        if(state.activeTeacherCode===t.code){
+          state.activeTeacherCode = state.teachers[0]?.code || null;
+          state.activeAssignId = null;
+        }
+        render();
+      };
+      row.querySelector('[data-act=edit]').onclick = ()=>{
+        state._editingTeacherCode = t.code;
         render();
       };
       listWrap.appendChild(row);
@@ -1199,15 +1227,20 @@ function renderStep3(){
   listCard.appendChild(listWrap);
   wrap.appendChild(listCard);
 
+  const editing = state._editingTeacherCode!=null ? state.teachers.find(t=>t.code===state._editingTeacherCode) : null;
+
   const formCard = document.createElement('div');
   formCard.className = 'card';
-  formCard.innerHTML = `<h2>Tambah Guru</h2><p class="sub">Masukkan kode &amp; nama guru, lalu tambahkan satu atau lebih mata pelajaran beserta kelas dan jumlah jamnya.</p>`;
+  formCard.innerHTML = editing
+    ? `<h2>✎ Edit Guru — ${editing.name}</h2><p class="sub">Perbarui data guru. <b style="color:var(--warn);">Perhatian:</b> menyimpan perubahan akan mengosongkan seluruh sel jadwal yang sudah diisi untuk guru ini di tahap "Susun Jadwal", karena jam/mata pelajaran mungkin berubah.</p>`
+    : `<h2>Tambah Guru</h2><p class="sub">Masukkan kode &amp; nama guru, lalu tambahkan satu atau lebih mata pelajaran beserta kelas dan jumlah jamnya.</p>`;
   const form = document.createElement('div');
   form.className = 'row-flex';
-  const nextCode = suggestNextCode();
+  const nextCode = editing ? editing.code : suggestNextCode();
+  const escAttr = s => String(s||'').replace(/"/g,'&quot;');
   form.innerHTML = `
     <div class="field"><label>Kode Guru</label><input type="number" id="tCode" value="${nextCode}"></div>
-    <div class="field" style="flex:2;"><label>Nama Guru</label><input type="text" id="tName" placeholder="Contoh: Bpk. Ian"></div>
+    <div class="field" style="flex:2;"><label>Nama Guru</label><input type="text" id="tName" placeholder="Contoh: Bpk. Ian" value="${editing ? escAttr(editing.name) : ''}"></div>
   `;
   formCard.appendChild(form);
 
@@ -1218,7 +1251,12 @@ function renderStep3(){
   const subList = document.createElement('div');
   formCard.appendChild(subList);
 
-  let subjectRows = [{id:uid('sr'), subject:'', classId: state.classes[0]?.id||'', hours:1}];
+  let subjectRows = editing
+    ? editing.subjects.map(s=>({id:uid('sr'), subject:s.subject, classId:s.classId, hours:s.hours}))
+    : [{id:uid('sr'), subject:'', classId: state.classes[0]?.id||'', hours:1}];
+  if(subjectRows.length===0){
+    subjectRows = [{id:uid('sr'), subject:'', classId: state.classes[0]?.id||'', hours:1}];
+  }
 
   function renderSubRows(){
     subList.innerHTML = '';
@@ -1250,28 +1288,52 @@ function renderStep3(){
   addSubBtn.onclick = ()=>{ subjectRows.push({id:uid('sr'), subject:'', classId: state.classes[0]?.id||'', hours:1}); renderSubRows(); };
   formCard.appendChild(addSubBtn);
 
+  const btnRow = document.createElement('div');
+  btnRow.style.display='flex'; btnRow.style.gap='10px';
+
   const saveBtn = document.createElement('button');
   saveBtn.className = 'btn';
-  saveBtn.textContent = 'Simpan Guru';
-  saveBtn.style.display='block';
+  saveBtn.textContent = editing ? 'Simpan Perubahan' : 'Simpan Guru';
   saveBtn.onclick = ()=>{
     const code = parseInt(form.querySelector('#tCode').value);
     const name = form.querySelector('#tName').value.trim();
     if(!code){ toast('Kode guru wajib diisi.', 'err'); return; }
-    if(state.teachers.some(t=>t.code===code)){ toast('Kode guru sudah digunakan.', 'err'); return; }
+    if(state.teachers.some(t=>t.code===code && (!editing || t.code!==editing.code))){
+      toast('Kode guru sudah digunakan oleh guru lain.', 'err'); return;
+    }
     if(!name){ toast('Nama guru wajib diisi.', 'err'); return; }
     if(subjectRows.some(sr=>!sr.subject.trim() || !sr.classId || !sr.hours || sr.hours<1)){
       toast('Lengkapi semua baris mata pelajaran (nama, kelas, jam > 0).', 'err'); return;
     }
-    const color = TEACHER_COLORS[state.teachers.length % TEACHER_COLORS.length];
-    state.teachers.push({
-      code, name, color,
-      subjects: subjectRows.map(sr=>({id:uid('asg'), subject:sr.subject.trim(), classId:sr.classId, hours:sr.hours, used:0}))
-    });
-    toast(`Guru ${name} tersimpan.`, 'ok');
+    const newSubjects = subjectRows.map(sr=>({id:uid('asg'), subject:sr.subject.trim(), classId:sr.classId, hours:sr.hours, used:0}));
+
+    if(editing){
+      clearTeacherSchedule(editing.code);
+      const oldCode = editing.code;
+      editing.code = code;
+      editing.name = name;
+      editing.subjects = newSubjects;
+      if(state.activeTeacherCode===oldCode) state.activeTeacherCode = code;
+      state.activeAssignId = null;
+      state._editingTeacherCode = null;
+      toast(`Guru ${name} berhasil diperbarui. Jadwal lama guru ini sudah dikosongkan.`, 'ok');
+    } else {
+      const color = TEACHER_COLORS[state.teachers.length % TEACHER_COLORS.length];
+      state.teachers.push({ code, name, color, subjects: newSubjects });
+      toast(`Guru ${name} tersimpan.`, 'ok');
+    }
     render();
   };
-  formCard.appendChild(saveBtn);
+  btnRow.appendChild(saveBtn);
+
+  if(editing){
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn ghost';
+    cancelBtn.textContent = 'Batalkan Edit';
+    cancelBtn.onclick = ()=>{ state._editingTeacherCode = null; render(); };
+    btnRow.appendChild(cancelBtn);
+  }
+  formCard.appendChild(btnRow);
 
   wrap.appendChild(formCard);
 
@@ -1280,13 +1342,17 @@ function renderStep3(){
   actions.innerHTML = `<div><button class="btn ghost" id="back3">← Kembali</button></div><div class="right"><button class="btn" id="next3">Lanjut ke Susun Jadwal →</button></div>`;
   wrap.appendChild(actions);
 
-  wrap.querySelector('#back3').addEventListener('click', ()=>{ state.step=2; render(); });
+  wrap.querySelector('#back3').addEventListener('click', ()=>{ state._editingTeacherCode=null; state.step=2; render(); });
   wrap.querySelector('#next3').addEventListener('click', ()=>{
     if(state.teachers.length===0){ toast('Tambahkan minimal satu guru terlebih dahulu.', 'err'); return; }
     if(!state.activeTeacherCode) state.activeTeacherCode = state.teachers[0].code;
+    state._editingTeacherCode = null;
     state.step = 4;
     render();
   });
+
+  listHead.querySelector('#btnExportTeachers').addEventListener('click', exportTeachersData);
+  listHead.querySelector('#btnImportTeachers').addEventListener('click', doImportTeachersFile);
 
   return wrap;
 }
@@ -1302,7 +1368,83 @@ function classNameById(id){
   const c = state.classes.find(c=>c.id===id);
   return c ? c.name : '?';
 }
+function clearTeacherSchedule(teacherCode){
+  state.days.forEach(day=>{
+    day.rows.forEach((row, rowIndex)=>{
+      const cellRow = state.schedule[day.id] && state.schedule[day.id][rowIndex];
+      if(!cellRow) return;
+      state.classes.forEach(cls=>{
+        const cell = cellRow[cls.id];
+        if(cell && cell.teacherCode===teacherCode){ delete cellRow[cls.id]; }
+      });
+    });
+  });
+}
 
+function exportTeachersData(){
+  if(state.teachers.length===0){ toast('Belum ada data guru untuk diekspor.', 'err'); return; }
+  const payload = {
+    _format: 'jadwal-guru-teachers-export',
+    _version: 1,
+    exportedAt: new Date().toISOString(),
+    teachers: state.teachers.map(t=>({
+      code: t.code,
+      name: t.name,
+      color: t.color,
+      subjects: t.subjects.map(s=>({
+        subject: s.subject,
+        className: classNameById(s.classId),
+        hours: s.hours
+      }))
+    }))
+  };
+  downloadBlob(JSON.stringify(payload, null, 2), 'data-guru.json');
+  toast('Data guru berhasil diekspor.', 'ok');
+}
+
+function importTeachersFromObj(obj){
+  if(!obj || obj._format!=='jadwal-guru-teachers-export' || !Array.isArray(obj.teachers)){
+    toast('File tidak dikenali sebagai file Data Guru.', 'err');
+    return;
+  }
+  let added=0, skippedCode=0, skippedNoClass=0;
+  obj.teachers.forEach(t=>{
+    if(!t.code || !t.name) return;
+    if(state.teachers.some(x=>x.code===t.code)){ skippedCode++; return; }
+    const subjects = (t.subjects||[]).map(s=>{
+      const cls = state.classes.find(c=>c.name===s.className);
+      if(!cls) return null;
+      return {id:uid('asg'), subject:(s.subject||'').trim(), classId:cls.id, hours: parseInt(s.hours)||1, used:0};
+    }).filter(Boolean);
+    if((t.subjects||[]).length && subjects.length===0){ skippedNoClass++; return; }
+    const color = t.color || TEACHER_COLORS[state.teachers.length % TEACHER_COLORS.length];
+    state.teachers.push({code: t.code, name: t.name.trim(), color, subjects});
+    added++;
+  });
+  let msg = `${added} guru berhasil diimpor.`;
+  if(skippedCode) msg += ` ${skippedCode} dilewati (kode guru sudah dipakai).`;
+  if(skippedNoClass) msg += ` ${skippedNoClass} dilewati (nama kelas tidak cocok dengan kelas saat ini).`;
+  toast(msg, added>0 ? 'ok' : 'err');
+  render();
+}
+
+function doImportTeachersFile(){
+  const inp = document.createElement('input');
+  inp.type='file'; inp.accept='application/json,.json';
+  inp.onchange = ()=>{
+    const file = inp.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const obj = JSON.parse(reader.result);
+        importTeachersFromObj(obj);
+      }catch(e){ toast('File tidak valid atau rusak.', 'err'); }
+    };
+    reader.readAsText(file);
+  };
+  inp.click();
+}
 /* =========================================================
    STEP 4 : SCHEDULER
 ========================================================= */
