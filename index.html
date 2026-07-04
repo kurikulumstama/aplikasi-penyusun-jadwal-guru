@@ -910,7 +910,7 @@ function renderStep3(){
   if(state.teachers.length===0){
     listWrap.innerHTML = `<div class="empty-hint">Belum ada guru yang ditambahkan.</div>`;
   } else {
-    state.teachers.forEach(t=>{
+    sortedTeachers().forEach(t=>{
       const totalHours = t.subjects.reduce((s,su)=>s+su.hours,0);
       const row = document.createElement('div');
       row.className = 'teacher-card';
@@ -1031,6 +1031,9 @@ function suggestNextCode(){
   if(state.teachers.length===0) return 1;
   return Math.max(...state.teachers.map(t=>t.code)) + 1;
 }
+function sortedTeachers(){
+  return state.teachers.slice().sort((a,b)=>a.code-b.code);
+}
 function classNameById(id){
   const c = state.classes.find(c=>c.id===id);
   return c ? c.name : '?';
@@ -1137,7 +1140,7 @@ function renderStep4(){
 
     const tSel = document.createElement('div'); tSel.className='field';
     tSel.innerHTML = `<label>Guru Aktif</label>
-      <select id="teacherSel">${state.teachers.map(t=>`<option value="${t.code}" ${t.code===state.activeTeacherCode?'selected':''}>#${t.code} — ${t.name}</option>`).join('')}</select>`;
+      <select id="teacherSel">${sortedTeachers().map(t=>`<option value="${t.code}" ${t.code===state.activeTeacherCode?'selected':''}>#${t.code} — ${t.name}</option>`).join('')}</select>`;
     side.appendChild(tSel);
     tSel.querySelector('select').onchange = e=>{
       state.activeTeacherCode = parseInt(e.target.value);
@@ -1204,7 +1207,7 @@ function renderStep4(){
     // legend
     const legend = document.createElement('div');
     legend.className = 'legend';
-    state.teachers.forEach(t=>{
+    sortedTeachers().forEach(t=>{
       legend.innerHTML += `<div class="lg"><span class="sw" style="background:${t.color};"></span>#${t.code} ${t.name}</div>`;
     });
     side.appendChild(legend);
