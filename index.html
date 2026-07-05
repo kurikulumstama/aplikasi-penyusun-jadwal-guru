@@ -348,6 +348,20 @@ td.classcell.pv-hot{
 td.classcell.pv-hot .fill{box-shadow:inset 0 0 0 1px rgba(255,255,255,.35);}
 .preview-empty-note{color:var(--muted-2);font-size:12.5px;text-align:center;padding:14px 0;border:1px dashed var(--border-soft);border-radius:10px;margin-top:10px;}
 
+/* ---------- Rekap Guru (teacher distribution) Stage ---------- */
+.distrib-daybar-list{display:flex;flex-direction:column;gap:12px;margin-top:14px;}
+.distrib-daybar-item .lbl{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:5px;}
+.distrib-daybar-item .lbl b{color:var(--gold-soft);font-family:'JetBrains Mono',monospace;}
+.distrib-daybar-item .bar{height:8px;border-radius:5px;background:var(--panel-3);overflow:hidden;}
+.distrib-daybar-item .bar > div{height:100%;border-radius:5px;transition:width .2s;}
+.distrib-empty-list{margin-top:18px;}
+.distrib-empty-list .sec-title{font-size:11px;color:var(--muted-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;}
+.distrib-empty-day{font-size:12.5px;color:var(--muted);margin-bottom:10px;line-height:1.5;}
+.distrib-empty-day b{color:var(--text);}
+.distrib-empty-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;}
+.distrib-empty-tag{background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px;font-size:11.5px;color:var(--muted-2);font-family:'JetBrains Mono',monospace;}
+td.classcell.dist-mine .fill{box-shadow:inset 0 0 0 1px rgba(255,255,255,.35);}
+
 .toast-wrap{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:10px;z-index:200;}
 .toast{
   background:var(--panel-3);border:1px solid var(--border);color:var(--text);padding:12px 18px;border-radius:10px;
@@ -444,6 +458,7 @@ const state = {
   blockSize: 1,
   activeDayTab: null,
   previewSelection: null,  // assignId of the guru+mapel+kelas currently spotlighted on the full preview stage
+  distribusiTeacherCode: null, // teacher code currently selected on the "Rekap Guru" distribution stage
 };
 
 let uidCounter = 1;
@@ -498,6 +513,8 @@ function serializeState(){
       activeAssignId: state.activeAssignId,
       blockSize: state.blockSize,
       activeDayTab: state.activeDayTab,
+      previewSelection: state.previewSelection,
+      distribusiTeacherCode: state.distribusiTeacherCode,
       _activeDayNames: state._activeDayNames
     }
   }, null, 2);
@@ -815,7 +832,7 @@ async function loadOnlineByName(name){
 /* =========================================================
    STEP NAV
 ========================================================= */
-const STEP_LABELS = ["Kelas","Hari & Sesi","Guru","Susun Jadwal","Preview Lengkap"];
+const STEP_LABELS = ["Kelas","Hari & Sesi","Guru","Susun Jadwal","Preview Lengkap","Rekap Guru"];
 function renderStepsNav(){
   const nav = document.getElementById('stepsNav');
   nav.innerHTML = '';
@@ -849,6 +866,7 @@ function render(){
   else if(state.step===3) root.appendChild(renderStep3());
   else if(state.step===4) root.appendChild(renderStep4());
   else if(state.step===5) root.appendChild(renderStep5());
+  else if(state.step===6) root.appendChild(renderStep6());
 }
 
 /* =========================================================
@@ -1858,7 +1876,7 @@ function renderStep5(){
   const backBtn = document.createElement('div');
   backBtn.className = 'actions';
   backBtn.style.margin = '18px 0 0';
-  backBtn.innerHTML = `<div><button class="btn ghost" id="back5">← Kembali ke Susun Jadwal</button></div><div class="right"></div>`;
+  backBtn.innerHTML = `<div><button class="btn ghost" id="back5">← Kembali ke Susun Jadwal</button></div><div class="right"><button class="btn gold" id="next5">Rekap Guru →</button></div>`;
   wrap.appendChild(backBtn);
 
   function currentSelection(){
@@ -2001,6 +2019,219 @@ function renderStep5(){
   buildSide();
 
   wrap.querySelector('#back5').addEventListener('click', ()=>{ state.step=4; render(); });
+  wrap.querySelector('#next5').addEventListener('click', ()=>{ state.step=6; render(); });
+
+  return wrap;
+}
+
+/* =========================================================
+   STEP 6 : REKAP GURU (teacher schedule distribution)
+   Pilih satu guru lewat dropdown — tabel jadwal langsung
+   menyalakan hanya blok jam milik guru tersebut (sel lain
+   tampil kosong, bukan diredupkan/grayed out), lalu di panel
+   samping ditampilkan statistik jam per hari (bar + angka)
+   beserta daftar jam kosong guru tersebut.
+========================================================= */
+function renderStep6(){
+  const wrap = document.createElement('div');
+  wrap.className = 'wrap wide';
+
+  const layout = document.createElement('div');
+  layout.className = 'sched-layout';
+  wrap.appendChild(layout);
+
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'sched-table-wrap';
+  layout.appendChild(tableWrap);
+
+  const side = document.createElement('div');
+  side.className = 'card side-card';
+  layout.appendChild(side);
+
+  const backBtn = document.createElement('div');
+  backBtn.className = 'actions';
+  backBtn.style.margin = '18px 0 0';
+  backBtn.innerHTML = `<div><button class="btn ghost" id="back6">← Kembali ke Preview Lengkap</button></div><div class="right"></div>`;
+  wrap.appendChild(backBtn);
+
+  if(!state.distribusiTeacherCode && state.teachers.length){
+    state.distribusiTeacherCode = sortedTeachers()[0].code;
+  }
+
+  function computeDistribution(teacherCode){
+    const perDay = [];
+    let totalAssigned = 0, totalSlots = 0;
+    state.days.forEach(day=>{
+      const sessionRows = [];
+      let sNum = 0;
+      day.rows.forEach((row, idx)=>{ if(row.type==='session'){ sNum++; sessionRows.push({rowIndex: idx, sessionNum: sNum}); } });
+      const assignedList = [];
+      const freeSessions = [];
+      sessionRows.forEach(sr=>{
+        let hit = null;
+        for(const cls of state.classes){
+          const cell = state.schedule[day.id] && state.schedule[day.id][sr.rowIndex] ? state.schedule[day.id][sr.rowIndex][cls.id] : null;
+          if(cell && cell.teacherCode===teacherCode){ hit = {sessionNum: sr.sessionNum, className: cls.name, subject: cell.subject}; break; }
+        }
+        if(hit) assignedList.push(hit); else freeSessions.push(sr.sessionNum);
+      });
+      perDay.push({dayId: day.id, dayName: day.name, totalSessions: sessionRows.length, assignedCount: assignedList.length, assignedList, freeSessions});
+      totalAssigned += assignedList.length;
+      totalSlots += sessionRows.length;
+    });
+    return {perDay, totalAssigned, totalSlots};
+  }
+
+  function buildTable(){
+    tableWrap.innerHTML = '';
+    const table = document.createElement('table');
+    table.className = 'sched';
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    headRow.innerHTML = `<th class="corner" style="left:0;position:sticky;">Hari</th><th class="corner" style="left:38px;position:sticky;">Sesi</th><th class="corner" style="left:76px;position:sticky;">Jam</th>`;
+    state.classes.forEach(c=>{ headRow.innerHTML += `<th>${c.name}</th>`; });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    const selCode = state.distribusiTeacherCode;
+
+    state.days.forEach(day=>{
+      const dayTimes = computeDayTimes(day);
+      day.rows.forEach((row, rowIndex)=>{
+        const tr = document.createElement('tr');
+        if(rowIndex===0){
+          const td = document.createElement('td');
+          td.className='daycell'; td.rowSpan = day.rows.length; td.textContent = day.name;
+          tr.appendChild(td);
+        }
+        let sessionNum = 0;
+        for(let i=0;i<=rowIndex;i++){ if(day.rows[i].type==='session') sessionNum++; }
+
+        const tdSes = document.createElement('td');
+        tdSes.className='sescell';
+        tdSes.textContent = row.type==='session' ? sessionNum : '-';
+        tr.appendChild(tdSes);
+
+        const tdTime = document.createElement('td');
+        tdTime.className='timecell';
+        const t = dayTimes[rowIndex];
+        const timeTxt = t ? `${t.start} - ${t.end}` : '—';
+        tdTime.innerHTML = `${timeTxt}${row.label ? `<span class="lbl">${row.label}</span>` : ''}`;
+        tr.appendChild(tdTime);
+
+        if(row.type==='other'){
+          const td = document.createElement('td');
+          td.className='blockcell'; td.colSpan = state.classes.length;
+          tr.appendChild(td);
+        } else {
+          state.classes.forEach(cls=>{
+            const td = document.createElement('td');
+            const cell = (state.schedule[day.id] && state.schedule[day.id][rowIndex]) ? state.schedule[day.id][rowIndex][cls.id] : null;
+            const isMine = !!(cell && cell.teacherCode === selCode);
+            // Only the selected teacher's own blocks light up; every other
+            // slot (empty OR taken by another teacher) reads as a plain
+            // empty cell, not dimmed/grayed.
+            td.className = 'classcell' + (isMine ? ' dist-mine' : ' empty');
+            if(isMine){
+              const ct = state.teachers.find(tt=>tt.code===cell.teacherCode);
+              const fill = document.createElement('div');
+              fill.className='fill';
+              fill.style.background = ct ? ct.color : '#555';
+              fill.innerHTML = `${ct?('#'+ct.code):'?'}<small>${cell.subject}</small>`;
+              td.appendChild(fill);
+              td.title = `${ct?ct.name:'?'} — ${cell.subject} (${cls.name})`;
+            }
+            tr.appendChild(td);
+          });
+        }
+        tbody.appendChild(tr);
+      });
+    });
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+  }
+
+  function buildSide(){
+    side.innerHTML = '';
+    const h = document.createElement('h2'); h.textContent = 'Rekap Guru'; h.style.fontSize='19px';
+    side.appendChild(h);
+    const p = document.createElement('p'); p.className='sub';
+    p.textContent = 'Pilih guru untuk melihat persebaran jam mengajarnya sepanjang minggu. Blok milik guru terpilih akan menyala; slot lain tampil kosong.';
+    side.appendChild(p);
+
+    if(state.teachers.length===0){
+      side.innerHTML += `<div class="preview-empty-note">Belum ada data guru.</div>`;
+      return;
+    }
+
+    const tSel = document.createElement('div'); tSel.className='field';
+    tSel.innerHTML = `<label>Pilih Guru</label>
+      <select id="distTeacherSel">${sortedTeachers().map(t=>`<option value="${t.code}" ${t.code===state.distribusiTeacherCode?'selected':''}>#${t.code} — ${t.name}</option>`).join('')}</select>`;
+    side.appendChild(tSel);
+    tSel.querySelector('select').onchange = e=>{
+      state.distribusiTeacherCode = parseInt(e.target.value);
+      buildSide();
+      buildTable();
+    };
+
+    const teacher = state.teachers.find(t=>t.code===state.distribusiTeacherCode);
+    if(!teacher) return;
+
+    const dist = computeDistribution(teacher.code);
+
+    const meter = document.createElement('div');
+    meter.className = 'hours-meter';
+    meter.innerHTML = `<div style="display:flex;justify-content:space-between;font-size:12.5px;">
+        <span>Total Jam Mengajar Terjadwal</span><b style="color:var(--gold-soft);">${dist.totalAssigned} / ${dist.totalSlots} sesi</b>
+      </div><div class="bar"><div style="width:${dist.totalSlots ? (100*dist.totalAssigned/dist.totalSlots) : 0}%;background:${teacher.color};"></div></div>`;
+    side.appendChild(meter);
+
+    const barList = document.createElement('div');
+    barList.className = 'distrib-daybar-list';
+    dist.perDay.forEach(d=>{
+      const pct = d.totalSessions ? Math.round(100*d.assignedCount/d.totalSessions) : 0;
+      const item = document.createElement('div');
+      item.className = 'distrib-daybar-item';
+      item.innerHTML = `<div class="lbl"><span>${d.dayName}</span><b>${d.assignedCount} / ${d.totalSessions} jam</b></div>
+        <div class="bar"><div style="width:${pct}%;background:${teacher.color};"></div></div>`;
+      barList.appendChild(item);
+    });
+    side.appendChild(barList);
+
+    const emptyWrap = document.createElement('div');
+    emptyWrap.className = 'distrib-empty-list';
+    const emptyTitle = document.createElement('div');
+    emptyTitle.className = 'sec-title';
+    emptyTitle.textContent = 'Jam Kosong per Hari';
+    emptyWrap.appendChild(emptyTitle);
+    dist.perDay.forEach(d=>{
+      const row = document.createElement('div');
+      row.className = 'distrib-empty-day';
+      if(d.totalSessions===0){
+        row.innerHTML = `<b>${d.dayName}</b> — <span style="color:var(--muted-2);">tidak ada baris sesi.</span>`;
+      } else if(d.freeSessions.length===0){
+        row.innerHTML = `<b>${d.dayName}</b> — <span style="color:var(--good);">penuh, tidak ada jam kosong.</span>`;
+      } else if(d.assignedCount===0){
+        row.innerHTML = `<b>${d.dayName}</b> — <span style="color:var(--muted-2);">tidak mengajar sama sekali (semua ${d.totalSessions} sesi kosong).</span>`;
+      } else {
+        row.innerHTML = `<b>${d.dayName}</b> — sesi kosong:<div class="distrib-empty-tags">${d.freeSessions.map(n=>`<span class="distrib-empty-tag">Sesi ${n}</span>`).join('')}</div>`;
+      }
+      emptyWrap.appendChild(row);
+    });
+    side.appendChild(emptyWrap);
+
+    const legend = document.createElement('div');
+    legend.className = 'legend';
+    legend.style.marginTop = '18px';
+    legend.innerHTML = `<div class="lg"><span class="sw" style="background:${teacher.color};"></span>#${teacher.code} ${teacher.name}</div>`;
+    side.appendChild(legend);
+  }
+
+  buildTable();
+  buildSide();
+
+  wrap.querySelector('#back6').addEventListener('click', ()=>{ state.step=5; render(); });
 
   return wrap;
 }
